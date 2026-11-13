@@ -1,0 +1,225 @@
+import os
+import json
+import base64
+import secrets
+import string
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.exceptions import InvalidTag
+
+class SecurePasswordManager:
+    """
+    A secure, local password manager implementing PBKDF2 for key derivation 
+    and AES-GCM for authenticated encryption.
+    """
+    def __init__(self, storage_file="vault.json"):
+        self.storage_file = storage_file
+        self.key = None
+
+    def initialize_vault(self, master_password: str):
+        """Initializes a new vault by deriving an AES key from the master password using PBKDF2."""
+        # Generate a cryptographically secure random salt (16 bytes)
+        salt = os.urandom(16)
+        
+        # Derive a 256-bit key using PBKDF2 with SHA-256 and high iterations
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100_000,
+        )
+        self.key = kdf.derive(master_password.encode())
+
+        # Save the salt and an empty vault structure
+        vault_data = {
+            "salt": base64.b64encode(salt).decode('utf-8'),
+            "encrypted_data": ""
+        }
+        self._save_vault_file(vault_data)
+        print("\n[+] Vault successfully created!")
+
+    def unlock_vault(self, master_password: str):
+        """Unlocks an existing vault, verifying the master password via AES-GCM decryption test."""
+        if not os.path.exists(self.storage_file):
+            print("\n[-] Vault file not found. Please create a vault first.")
+            return False
+
+        try:
+            vault_data = self._load_vault_file()
+            salt = base64.b64decode(vault_data["salt"])
+
+            # Re-derive the key using the stored salt and provided master password
+            kdf = PBKDF2HMAC(
+                algorithm=hashes.SHA256(),
+                length=32,
+                salt=salt,
+                iterations=100_000,
+            )
+            temp_key = kdf.derive(master_password.encode())
+
+            # If the vault contains data, test the key by attempting decryption (checks integrity tag)
+            if vault_data.get("encrypted_data"):
+                data = base64.b64decode(vault_data["encrypted_data"].encode('utf-8'))
+                nonce = data[:12]
+                ciphertext = data[12:]
+                aesgcm = AESGCM(temp_key)
+                aesgcm.decrypt(nonce, ciphertext, None) # Raises InvalidTag if password is wrong
+            
+            self.key = temp_key
+            print("\n[+] Vault successfully unlocked!")
+            return True
+        
+        except (InvalidTag, Exception):
+            print("\n[-] Incorrect master password! Failed to unlock vault.")
+            self.key = None
+            return False
+
+    def add_password(self, service: str, username: str, password: str):
+        """Encrypts and adds a new service credential to the vault."""
+        if not self.key:
+            print("\n[-] Vault is locked! Please unlock the vault first.")
+            return
+
+        vault_data = self._load_vault_file()
+        passwords = {}
+        
+        if vault_data.get("encrypted_data"):
+            try:
+                passwords = self._decrypt_passwords(vault_data["encrypted_data"])
+            except Exception:
+                passwords = {}
+
+        # Add or update the service credential
+        passwords[service] = {"username": username, "password": password}
+
+        # Convert dictionary to JSON bytes
+        json_bytes = json.dumps(passwords).encode('utf-8')
+        
+        # Encrypt data using AES-GCM
+        aesgcm = AESGCM(self.key)
+        nonce = os.urandom(12) # Generate a unique 12-byte nonce for each encryption
+        ciphertext = aesgcm.encrypt(nonce, json_bytes, None)
+
+        # Combine nonce + ciphertext and encode in Base64 for storage
+        encrypted_payload = base64.b64encode(nonce + ciphertext).decode('utf-8')
+        vault_data["encrypted_data"] = encrypted_payload
+        
+        self._save_vault_file(vault_data)
+        print(f"\n[+] Credentials for '{service}' successfully saved.")
+
+    def get_password(self, service: str):
+        """Decrypts and retrieves credentials for a specific service."""
+        if not self.key:
+            print("\n[-] Vault is locked! Please unlock the vault first.")
+            return
+
+        vault_data = self._load_vault_file()
+        if not vault_data.get("encrypted_data"):
+            print("\n[-] Vault is currently empty.")
+            return
+
+        try:
+            passwords = self._decrypt_passwords(vault_data["encrypted_data"])
+            if service in passwords:
+                print(f"\n--- [ {service} Details ] ---")
+                print(f"Username : {passwords[service]['username']}")
+                print(f"Password : {passwords[service]['password']}")
+                print("-" * 25)
+            else:
+                print(f"\n[-] No record found for service '{service}'.")
+        except Exception as e:
+            print(f"\n[-] Error decrypting passwords: {e}")
+
+    def _decrypt_passwords(self, encrypted_payload: str):
+        """Helper method to decrypt the stored payload back into a Python dictionary."""
+        data = base64.b64decode(encrypted_payload.encode('utf-8'))
+        nonce = data[:12]
+        ciphertext = data[12:]
+        
+        aesgcm = AESGCM(self.key)
+        decrypted_bytes = aesgcm.decrypt(nonce, ciphertext, None)
+        return json.loads(decrypted_bytes.decode('utf-8'))
+
+    def _save_vault_file(self, data):
+        """Helper method to write JSON data to disk."""
+        with open(self.storage_file, "w") as f:
+            json.dump(data, f, indent=4)
+
+    def _load_vault_file(self):
+        """Helper method to read JSON data from disk."""
+        with open(self.storage_file, "r") as f:
+            return json.load(f)
+
+
+def generate_strong_password(length=16):
+    """Generates a cryptographically secure random password."""
+    alphabet = string.ascii_letters + string.digits + string.punctuation
+    while True:
+        password = ''.join(secrets.choice(alphabet) for _ in range(length))
+        # Ensure password complexity criteria are met
+        if (any(c.islower() for c in password)
+                and any(c.isupper() for c in password)
+                and any(c.isdigit() for c in password)
+                and any(c in string.punctuation for c in password)):
+            return password
+
+
+def main():
+    manager = SecurePasswordManager()
+    
+    while True:
+        print("\n=== SECURE PASSWORD MANAGER ===")
+        print("1. Create New Vault")
+        print("2. Unlock Vault")
+        print("3. Add Password")
+        print("4. Retrieve Password")
+        print("5. Generate Strong Password")
+        print("6. Exit")
+        
+        choice = input("\nSelect an option (1-6): ").strip()
+        
+        if choice == "1":
+            master = input("Enter a strong Master Password: ")
+            manager.initialize_vault(master)
+        
+        elif choice == "2":
+            master = input("Enter your Master Password: ")
+            manager.unlock_vault(master)
+        
+        elif choice == "3":
+            if not manager.key:
+                print("\n[-] Access denied: You must unlock the vault first (Option 2).")
+                continue
+            service = input("Service Name (e.g., github.com): ")
+            username = input("Username / Email: ")
+            
+            gen_choice = input("Do you want to generate a strong password automatically? (y/n): ").strip().lower()
+            if gen_choice == 'y':
+                password = generate_strong_password()
+                print(f"[+] Generated Password: {password}")
+            else:
+                password = input("Enter Password: ")
+                
+            manager.add_password(service, username, password)
+        
+        elif choice == "4":
+            if not manager.key:
+                print("\n[-] Access denied: You must unlock the vault first (Option 2).")
+                continue
+            service = input("Service Name to look up (e.g., github.com): ")
+            manager.get_password(service)
+            
+        elif choice == "5":
+            strong_pwd = generate_strong_password()
+            print(f"\n[+] Generated Secure Password: {strong_pwd}")
+        
+        elif choice == "6":
+            print("\nExiting program. Stay secure!")
+            break
+        
+        else:
+            print("\n[-] Invalid selection, please enter a number between 1 and 6.")
+
+if __name__ == "__main__":
+    main()
