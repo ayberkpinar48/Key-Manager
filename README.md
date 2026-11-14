@@ -2,8 +2,6 @@
 
 A secure, lightweight local password manager built in Python. It implements cryptographic best practices including key derivation functions and authenticated encryption to protect sensitive user credentials.
 
-*A project I initially started to learn about encryption algorithms has evolved into something I now use myself.*
-
 ## Cryptographic Architecture
 
 1. **Key Derivation (KDF):** User master passwords are never stored. Instead, a strong 256-bit AES key is derived using **PBKDF2-HMAC-SHA256** with 100,000 iterations and a cryptographically secure random 16-byte salt.
@@ -11,11 +9,17 @@ A secure, lightweight local password manager built in Python. It implements cryp
 3. **Secret Generation:** Standalone and automatic strong passwords are generated using Python's cryptographically secure `secrets` module.
 4. **Secure Input:** Master passwords and secrets are securely read from the terminal without echoing using the `getpass` module.
 
+## Features
+
+- **Multiple Accounts Support:** Store multiple usernames/passwords for the same service.
+- **Automatic Clipboard Management:** Automatically copies retrieved or generated passwords to your system clipboard using `pyperclip`.
+- **Full CRUD Management:** Initialize, add, retrieve, list, and delete vault entries securely from the command line.
+
 ## Prerequisites
 
 - Python 3.7+
 - `cryptography` library
-- `pyperclip` library (for clipboard support)
+- `pyperclip` library
 
 ## Installation
 
