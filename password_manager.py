@@ -15,7 +15,7 @@ class SecurePasswordManager:
     """
     A secure, local command-line password manager implementing PBKDF2 
     for key derivation and AES-GCM for authenticated encryption.
-    Supports multiple accounts, listing entries, and secure deletion.
+    Supports multiple accounts, robust listing, and secure deletion.
     """
     def __init__(self, storage_file="vault.json"):
         self.storage_file = storage_file
@@ -102,7 +102,11 @@ class SecurePasswordManager:
         if passwords is None:
             return
 
-        matching_records = [v for k, v in passwords.items() if v.get("service") == service]
+        # Filter records matching the requested service (with fallback for legacy records)
+        matching_records = [
+            v for k, v in passwords.items() 
+            if v.get("service") == service or (not v.get("service") and k == service)
+        ]
 
         if not matching_records:
             print(f"\n[-] No records found for service '{service}'.")
@@ -111,14 +115,14 @@ class SecurePasswordManager:
         if len(matching_records) > 1 and not username:
             print(f"\n[!] Multiple accounts found for '{service}':")
             for rec in matching_records:
-                print(f"    - Username: {rec['username']}")
+                print(f"    - Username: {rec.get('username', 'N/A')}")
             print("[-] Please specify a username using the -u/--username flag.")
             return
 
         target_record = None
         if username:
             for rec in matching_records:
-                if rec['username'] == username:
+                if rec.get('username') == username:
                     target_record = rec
                     break
         else:
@@ -126,8 +130,11 @@ class SecurePasswordManager:
 
         if target_record:
             pwd = target_record['password']
-            print(f"\n--- [ {target_record['service']} ({target_record['username']}) ] ---")
-            print(f"Username : {target_record['username']}")
+            svc_name = target_record.get('service', service)
+            usr_name = target_record.get('username', 'N/A')
+            
+            print(f"\n--- [ {svc_name} ({usr_name}) ] ---")
+            print(f"Username : {usr_name}")
             print(f"Password : [Copied to Clipboard]")
             print("-" * 35)
             pyperclip.copy(pwd)
@@ -148,7 +155,10 @@ class SecurePasswordManager:
 
         print("\n--- [ Stored Vault Entries ] ---")
         for record_key, data in passwords.items():
-            print(f" • Service: {data['service']} | Username: {data['username']}")
+            # Defensive programming: handle both old records and new composite records safely
+            service = data.get('service', record_key.split(' | ')[0] if ' | ' in record_key else record_key)
+            username = data.get('username', 'N/A')
+            print(f" • Service: {service} | Username: {username}")
         print("-" * 32)
 
     def delete_password(self, service: str, username: str):
