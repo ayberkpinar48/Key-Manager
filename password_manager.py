@@ -3,9 +3,10 @@ import json
 import base64
 import secrets
 import string
-import getpass
 import argparse
 import pyperclip
+import tkinter as tk
+from tkinter import messagebox
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -13,9 +14,7 @@ from cryptography.exceptions import InvalidTag
 
 class SecurePasswordManager:
     """
-    A secure, local command-line password manager implementing PBKDF2 
-    for key derivation and AES-GCM for authenticated encryption.
-    Supports multiple accounts, robust listing, and secure deletion.
+    Core cryptographic backend for the local password manager.
     """
     def __init__(self, storage_file="vault.json"):
         self.storage_file = storage_file
@@ -30,34 +29,22 @@ class SecurePasswordManager:
         )
         return kdf.derive(master_password.encode())
 
-    def initialize_vault(self):
-        """Initializes a new encrypted vault file."""
+    def initialize_vault(self, master_password: str) -> bool:
+        """Initializes a new encrypted vault file with the given master password."""
         if os.path.exists(self.storage_file):
-            print("\n[-] Vault already exists! Delete 'vault.json' if you want to create a new one.")
-            return
+            return False
 
-        master_password = getpass.getpass("Enter a strong Master Password: ")
-        confirm_password = getpass.getpass("Confirm Master Password: ")
-
-        if master_password != confirm_password:
-            print("\n[-] Passwords do not match! Vault creation aborted.")
-            return
-
-        # Generate a cryptographically secure random salt (16 bytes)
         salt = os.urandom(16)
-        
-        # Save salt and empty encrypted payload container
         vault_data = {
             "salt": base64.b64encode(salt).decode('utf-8'),
             "encrypted_data": ""
         }
         self._save_vault_file(vault_data)
-        print("\n[+] Vault successfully created and initialized!")
+        return True
 
     def _load_and_decrypt_vault(self, master_password: str) -> dict:
-        """Loads the vault file, verifies the master password, and returns decrypted passwords."""
+        """Loads and decrypts the vault using the master password."""
         if not os.path.exists(self.storage_file):
-            print("\n[-] Vault file not found. Run 'init' first.")
             return None
 
         vault_data = self._load_vault_file()
@@ -65,7 +52,7 @@ class SecurePasswordManager:
         key = self._derive_key(master_password, salt)
 
         if not vault_data.get("encrypted_data"):
-            return {} # Vault is empty, but password is valid
+            return {}
 
         try:
             data = base64.b64decode(vault_data["encrypted_data"].encode('utf-8'))
@@ -77,109 +64,14 @@ class SecurePasswordManager:
             return json.loads(decrypted_bytes.decode('utf-8'))
         
         except (InvalidTag, Exception):
-            print("\n[-] Incorrect master password or corrupted vault file!")
             return None
 
-    def add_password(self, service: str, username: str, password: str):
-        """Adds or updates a credential using a composite key (service + username)."""
-        master_password = getpass.getpass("Enter Master Password to unlock vault: ")
-        passwords = self._load_and_decrypt_vault(master_password)
-        
-        if passwords is None:
-            return
-
-        record_key = f"{service} | {username}"
-        passwords[record_key] = {"service": service, "username": username, "password": password}
-
-        self._save_and_encrypt_vault(master_password, passwords)
-        print(f"\n[+] Credentials for '{service}' ({username}) successfully saved.")
-
-    def get_password(self, service: str, username: str = None):
-        """Retrieves, displays, and copies a specific service password to the clipboard."""
-        master_password = getpass.getpass("Enter Master Password to unlock vault: ")
-        passwords = self._load_and_decrypt_vault(master_password)
-        
-        if passwords is None:
-            return
-
-        # Filter records matching the requested service (with fallback for legacy records)
-        matching_records = [
-            v for k, v in passwords.items() 
-            if v.get("service") == service or (not v.get("service") and k == service)
-        ]
-
-        if not matching_records:
-            print(f"\n[-] No records found for service '{service}'.")
-            return
-
-        if len(matching_records) > 1 and not username:
-            print(f"\n[!] Multiple accounts found for '{service}':")
-            for rec in matching_records:
-                print(f"    - Username: {rec.get('username', 'N/A')}")
-            print("[-] Please specify a username using the -u/--username flag.")
-            return
-
-        target_record = None
-        if username:
-            for rec in matching_records:
-                if rec.get('username') == username:
-                    target_record = rec
-                    break
-        else:
-            target_record = matching_records[0]
-
-        if target_record:
-            pwd = target_record['password']
-            svc_name = target_record.get('service', service)
-            usr_name = target_record.get('username', 'N/A')
-            
-            print(f"\n--- [ {svc_name} ({usr_name}) ] ---")
-            print(f"Username : {usr_name}")
-            print(f"Password : [Copied to Clipboard]")
-            print("-" * 35)
-            pyperclip.copy(pwd)
-        else:
-            print(f"\n[-] No record found for service '{service}' with username '{username}'.")
-
-    def list_vault_entries(self):
-        """Lists all saved services and usernames securely without exposing plaintext passwords."""
-        master_password = getpass.getpass("Enter Master Password to unlock vault: ")
-        passwords = self._load_and_decrypt_vault(master_password)
-        
-        if passwords is None:
-            return
-
-        if not passwords:
-            print("\n[-] Vault is currently empty.")
-            return
-
-        print("\n--- [ Stored Vault Entries ] ---")
-        for record_key, data in passwords.items():
-            # Defensive programming: handle both old records and new composite records safely
-            service = data.get('service', record_key.split(' | ')[0] if ' | ' in record_key else record_key)
-            username = data.get('username', 'N/A')
-            print(f" • Service: {service} | Username: {username}")
-        print("-" * 32)
-
-    def delete_password(self, service: str, username: str):
-        """Deletes a specific credential entry from the vault."""
-        master_password = getpass.getpass("Enter Master Password to unlock vault: ")
-        passwords = self._load_and_decrypt_vault(master_password)
-        
-        if passwords is None:
-            return
-
-        record_key = f"{service} | {username}"
-        if record_key in passwords:
-            del passwords[record_key]
-            self._save_and_encrypt_vault(master_password, passwords)
-            print(f"\n[+] Credentials for '{service}' ({username}) successfully deleted.")
-        else:
-            print(f"\n[-] No record found for service '{service}' with username '{username}'.")
-
-    def _save_and_encrypt_vault(self, master_password: str, passwords: dict):
-        """Helper method to encrypt and save the entire password dictionary to disk."""
+    def save_passwords(self, master_password: str, passwords: dict) -> bool:
+        """Encrypts and saves the password dictionary to disk."""
         vault_data = self._load_vault_file()
+        if not vault_data:
+            return False
+            
         salt = base64.b64decode(vault_data["salt"])
         key = self._derive_key(master_password, salt)
 
@@ -192,6 +84,7 @@ class SecurePasswordManager:
         vault_data["encrypted_data"] = encrypted_payload
         
         self._save_vault_file(vault_data)
+        return True
 
     def _save_vault_file(self, data):
         with open(self.storage_file, "w") as f:
@@ -214,66 +107,215 @@ def generate_strong_password(length=16) -> str:
             return password
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Secure Local Command-Line Password Manager")
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+class PasswordManagerGUI:
+    """
+    Lightweight, performance-oriented Tkinter GUI with resizable dialogs and keyboard shortcuts.
+    """
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Secure Password Manager")
+        self.root.geometry("600x600")
+        self.root.resizable(True, True)
 
-    # init command
-    subparsers.add_parser("init", help="Initialize a new encrypted vault")
+        self.manager = SecurePasswordManager()
+        self.master_password = None
+        self.passwords = {}
 
-    # add command
-    add_parser = subparsers.add_parser("add", help="Add or update a password entry")
-    add_parser.add_argument("-s", "--service", required=True, help="Service name (e.g., github.com)")
-    add_parser.add_argument("-u", "--username", required=True, help="Username or email")
-    add_parser.add_argument("--gen", action="store_true", help="Automatically generate a strong password and copy it")
+        self.build_auth_screen()
 
-    # get command
-    get_parser = subparsers.add_parser("get", help="Retrieve a password entry")
-    get_parser.add_argument("-s", "--service", required=True, help="Service name to look up")
-    get_parser.add_argument("-u", "--username", required=False, help="Specific username (required if multiple accounts exist)")
+    def clear_window(self):
+        """Destroys all current widgets in the window."""
+        for widget in self.root.winfo_children():
+            widget.destroy()
 
-    # list command
-    subparsers.add_parser("list", help="List all stored service entries")
+    def build_auth_screen(self):
+        """Builds the Vault Initialization / Unlock Screen with Enter-key binding."""
+        self.clear_window()
 
-    # delete command
-    del_parser = subparsers.add_parser("delete", help="Delete a password entry")
-    del_parser.add_argument("-s", "--service", required=True, help="Service name")
-    del_parser.add_argument("-u", "--username", required=True, help="Username or email")
+        is_existing = os.path.exists("vault.json")
+        title_text = "Unlock Existing Vault" if is_existing else "Initialize New Vault"
 
-    # generate command
-    subparsers.add_parser("generate", help="Generate a standalone strong random password")
+        tk.Label(self.root, text=title_text, font=("Arial", 14, "bold")).pack(pady=20)
 
-    args = parser.parse_args()
-    manager = SecurePasswordManager()
+        tk.Label(self.root, text="Master Password:", font=("Arial", 10)).pack(pady=5)
+        self.pass_entry = tk.Entry(self.root, show="*", width=32, font=("Arial", 11))
+        self.pass_entry.pack(pady=5)
+        self.pass_entry.focus()
 
-    if args.command == "init":
-        manager.initialize_vault()
-
-    elif args.command == "add":
-        if args.gen:
-            password = generate_strong_password()
-            pyperclip.copy(password)
-            print(f"\n[+] Generated Strong Password & Copied to Clipboard: {password}")
+        if not is_existing:
+            tk.Label(self.root, text="Confirm Master Password:", font=("Arial", 10)).pack(pady=5)
+            self.confirm_entry = tk.Entry(self.root, show="*", width=32, font=("Arial", 11))
+            self.confirm_entry.pack(pady=5)
+            btn_text = "Create Vault"
+            btn_command = self.handle_init
         else:
-            password = getpass.getpass("Enter password to store: ")
-        manager.add_password(args.service, args.username, password)
+            btn_text = "Unlock Vault"
+            btn_command = self.handle_unlock
 
-    elif args.command == "get":
-        manager.get_password(args.service, args.username)
+        btn = tk.Button(self.root, text=btn_text, width=22, bg="#2E7D32", fg="white", font=("Arial", 10, "bold"), command=btn_command)
+        btn.pack(pady=20)
 
-    elif args.command == "list":
-        manager.list_vault_entries()
+        self.root.bind('<Return>', lambda event: btn_command())
 
-    elif args.command == "delete":
-        manager.delete_password(args.service, args.username)
+    def handle_init(self):
+        """Handles new vault creation from GUI."""
+        p1 = self.pass_entry.get()
+        p2 = self.confirm_entry.get()
 
-    elif args.command == "generate":
-        strong_pwd = generate_strong_password()
-        pyperclip.copy(strong_pwd)
-        print(f"\n[+] Generated & Copied Secure Password: {strong_pwd}")
+        if not p1 or p1 != p2:
+            messagebox.showerror("Error", "Passwords do not match or are empty!")
+            return
 
-    else:
-        parser.print_help()
+        if self.manager.initialize_vault(p1):
+            messagebox.showinfo("Success", "Vault successfully created!")
+            self.master_password = p1
+            self.passwords = {}
+            self.root.unbind('<Return>')
+            self.build_main_screen()
+        else:
+            messagebox.showerror("Error", "Vault already exists.")
+
+    def handle_unlock(self):
+        """Handles unlocking existing vault from GUI."""
+        password = self.pass_entry.get()
+        decrypted_data = self.manager._load_and_decrypt_vault(password)
+
+        if decrypted_data is not None:
+            self.master_password = password
+            self.passwords = decrypted_data
+            self.root.unbind('<Return>')
+            self.build_main_screen()
+        else:
+            messagebox.showerror("Error", "Incorrect Master Password!")
+
+    def build_main_screen(self):
+        """Builds the main dashboard screen after successful unlock with clear action buttons."""
+        self.clear_window()
+
+        top_frame = tk.Frame(self.root)
+        top_frame.pack(pady=10, fill=tk.X, padx=20)
+
+        tk.Label(top_frame, text="Stored Credentials", font=("Arial", 12, "bold")).pack(side=tk.LEFT)
+        tk.Button(top_frame, text="Lock Vault", bg="#616161", fg="white", font=("Arial", 9), command=self.build_auth_screen).pack(side=tk.RIGHT)
+
+        list_frame = tk.Frame(self.root)
+        list_frame.pack(pady=5)
+
+        self.listbox = tk.Listbox(list_frame, width=54, height=12, font=("Arial", 10))
+        self.listbox.pack(side=tk.LEFT, fill=tk.BOTH)
+
+        scrollbar = tk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.listbox.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.listbox.config(yscrollcommand=scrollbar.set)
+
+        self.refresh_listbox()
+
+        btn_frame = tk.Frame(self.root)
+        btn_frame.pack(pady=15)
+
+        tk.Button(btn_frame, text="➕ Add Entry", width=14, bg="#1976D2", fg="white", font=("Arial", 9, "bold"), command=self.open_add_dialog).grid(row=0, column=0, padx=6)
+        tk.Button(btn_frame, text="📋 Copy Password", width=14, bg="#F57C00", fg="white", font=("Arial", 9, "bold"), command=self.copy_selected_password).grid(row=0, column=1, padx=6)
+        tk.Button(btn_frame, text="🗑️ Delete Entry", width=14, bg="#D32F2F", fg="white", font=("Arial", 9, "bold"), command=self.delete_selected_entry).grid(row=0, column=2, padx=6)
+
+    def refresh_listbox(self):
+        """Refreshes the entries displayed in the listbox."""
+        self.listbox.delete(0, tk.END)
+        for record_key, data in self.passwords.items():
+            service = data.get('service', record_key.split(' | ')[0] if ' | ' in record_key else record_key)
+            username = data.get('username', 'N/A')
+            self.listbox.insert(tk.END, f"{service}  —  ({username})")
+
+    def open_add_dialog(self):
+        """Opens a popup dialog to add a new credential with proper sizing and resizability."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Add New Credential")
+        dialog.geometry("360x320") # Increased size to prevent overflow
+        dialog.resizable(True, True) # Allow user to resize if needed
+        dialog.grab_set()
+
+        tk.Label(dialog, text="Service Name (e.g., github.com):", font=("Arial", 9)).pack(anchor="w", padx=20, pady=(15, 5))
+        srv_entry = tk.Entry(dialog, width=34, font=("Arial", 10))
+        srv_entry.pack(padx=20)
+        srv_entry.focus()
+
+        tk.Label(dialog, text="Username / Email:", font=("Arial", 9)).pack(anchor="w", padx=20, pady=(10, 5))
+        usr_entry = tk.Entry(dialog, width=34, font=("Arial", 10))
+        usr_entry.pack(padx=20)
+
+        tk.Label(dialog, text="Password (leave blank to auto-generate):", font=("Arial", 9)).pack(anchor="w", padx=20, pady=(10, 5))
+        pwd_entry = tk.Entry(dialog, width=34, show="*", font=("Arial", 10))
+        pwd_entry.pack(padx=20)
+
+        def save_entry():
+            service = srv_entry.get().strip()
+            username = usr_entry.get().strip()
+            password = pwd_entry.get().strip()
+
+            if not service or not username:
+                messagebox.showerror("Error", "Service and Username are required!", parent=dialog)
+                return
+
+            if not password:
+                password = generate_strong_password()
+                messagebox.showinfo("Generated", f"Strong password generated & copied!", parent=dialog)
+                pyperclip.copy(password)
+
+            record_key = f"{service} | {username}"
+            self.passwords[record_key] = {
+                "service": service,
+                "username": username,
+                "password": password
+            }
+
+            if self.manager.save_passwords(self.master_password, self.passwords):
+                self.refresh_listbox()
+                dialog.destroy()
+                messagebox.showinfo("Success", "Credential saved successfully!")
+            else:
+                messagebox.showerror("Error", "Failed to save to vault.", parent=dialog)
+
+        save_btn = tk.Button(dialog, text="💾 Save Credential", width=22, bg="#2E7D32", fg="white", font=("Arial", 9, "bold"), command=save_entry)
+        save_btn.pack(pady=20)
+        
+        dialog.bind('<Return>', lambda event: save_entry())
+
+    def copy_selected_password(self):
+        """Copies the password of the selected item in the listbox to clipboard."""
+        selected_idx = self.listbox.curselection()
+        if not selected_idx:
+            messagebox.showwarning("Warning", "Please select an entry from the list first.")
+            return
+
+        record_keys = list(self.passwords.keys())
+        target_key = record_keys[selected_idx[0]]
+        password = self.passwords[target_key]['password']
+
+        pyperclip.copy(password)
+        messagebox.showinfo("Copied", "Password successfully copied to clipboard!")
+
+    def delete_selected_entry(self):
+        """Deletes the selected credential entry after confirmation."""
+        selected_idx = self.listbox.curselection()
+        if not selected_idx:
+            messagebox.showwarning("Warning", "Please select an entry to delete first.")
+            return
+
+        record_keys = list(self.passwords.keys())
+        target_key = record_keys[selected_idx[0]]
+
+        if messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete this entry?"):
+            del self.passwords[target_key]
+            if self.manager.save_passwords(self.master_password, self.passwords):
+                self.refresh_listbox()
+                messagebox.showinfo("Success", "Entry deleted successfully!")
+            else:
+                messagebox.showerror("Error", "Failed to update vault.")
+
+
+def main():
+    root = tk.Tk()
+    app = PasswordManagerGUI(root)
+    root.mainloop()
 
 if __name__ == "__main__":
     main()
