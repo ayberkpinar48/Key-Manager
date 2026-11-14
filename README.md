@@ -2,6 +2,8 @@
 
 A secure, lightweight local password manager built in Python. It implements cryptographic best practices including key derivation functions and authenticated encryption to protect sensitive user credentials.
 
+*A project I initially started to learn about encryption algorithms has evolved into something I now use myself.*
+
 ## Cryptographic Architecture
 
 1. **Key Derivation (KDF):** User master passwords are never stored. Instead, a strong 256-bit AES key is derived using **PBKDF2-HMAC-SHA256** with 100,000 iterations and a cryptographically secure random 16-byte salt.
