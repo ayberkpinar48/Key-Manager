@@ -5,6 +5,7 @@ import secrets
 import string
 import getpass
 import argparse
+import pyperclip
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -89,7 +90,7 @@ class SecurePasswordManager:
         # Update or add service record
         passwords[service] = {"username": username, "password": password}
 
-        # Re-encrypt everything with a freshly derived key and new salt (or same salt)
+        # Re-encrypt everything with a freshly derived key and existing salt
         vault_data = self._load_vault_file()
         salt = base64.b64decode(vault_data["salt"])
         key = self._derive_key(master_password, salt)
@@ -106,7 +107,7 @@ class SecurePasswordManager:
         print(f"\n[+] Credentials for '{service}' successfully saved.")
 
     def get_password(self, service: str):
-        """Retrieves and displays a specific service credential."""
+        """Retrieves, displays, and copies a specific service password to the clipboard."""
         master_password = getpass.getpass("Enter Master Password to unlock vault: ")
         passwords = self._load_and_decrypt_vault(master_password)
         
@@ -114,10 +115,16 @@ class SecurePasswordManager:
             return
 
         if service in passwords:
+            username = passwords[service]['username']
+            password = passwords[service]['password']
+            
             print(f"\n--- [ {service} Details ] ---")
-            print(f"Username : {passwords[service]['username']}")
-            print(f"Password : {passwords[service]['password']}")
+            print(f"Username : {username}")
+            print(f"Password : [Copied to Clipboard]")
             print("-" * 25)
+            
+            # Copy password to clipboard automatically
+            pyperclip.copy(password)
         else:
             print(f"\n[-] No record found for service '{service}'.")
 
@@ -153,7 +160,7 @@ def main():
     add_parser = subparsers.add_parser("add", help="Add or update a password entry")
     add_parser.add_argument("-s", "--service", required=True, help="Service name (e.g., github.com)")
     add_parser.add_argument("-u", "--username", required=True, help="Username or email")
-    add_parser.add_argument("--gen", action="store_true", help="Automatically generate a strong password")
+    add_parser.add_argument("--gen", action="store_true", help="Automatically generate a strong password and copy it")
 
     # get command
     get_parser = subparsers.add_parser("get", help="Retrieve a password entry")
@@ -171,7 +178,8 @@ def main():
     elif args.command == "add":
         if args.gen:
             password = generate_strong_password()
-            print(f"\n[+] Generated Strong Password: {password}")
+            pyperclip.copy(password)
+            print(f"\n[+] Generated Strong Password & Copied to Clipboard: {password}")
         else:
             password = getpass.getpass("Enter password to store: ")
         manager.add_password(args.service, args.username, password)
@@ -180,7 +188,9 @@ def main():
         manager.get_password(args.service)
 
     elif args.command == "generate":
-        print(f"\n[+] Generated Secure Password: {generate_strong_password()}")
+        strong_pwd = generate_strong_password()
+        pyperclip.copy(strong_pwd)
+        print(f"\n[+] Generated & Copied Secure Password: {strong_pwd}")
 
     else:
         parser.print_help()
