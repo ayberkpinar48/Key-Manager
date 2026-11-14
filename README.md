@@ -25,16 +25,20 @@ A secure, lightweight local password manager built in Python. It implements cryp
 ## Usage
  
  1. Initialize a new vault:
+    ```bash
     python password_manager.py init
  
  2. Add a password (with auto generation and clipboard copy)
+    ```bash
     python password_manager.py add -s [service.com] -u [user] --gen
     python password_manager.py add -s [service.com] -u [another_user] --gen
 
  3. Retrieve a password (automatically copies to clipboard)  !! do not forget to unlock to vault for this
+    ```bash
     python password_manager.py get -s [service.com] -u [user]
 
  4. Generate a sandalone secure password
+    ```bash
     python password_manager.py generate
 
 ## Security Note
