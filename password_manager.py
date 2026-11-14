@@ -15,7 +15,7 @@ class SecurePasswordManager:
     """
     A secure, local command-line password manager implementing PBKDF2 
     for key derivation and AES-GCM for authenticated encryption.
-    Supports multiple accounts per service via unique service-username keys.
+    Supports multiple accounts, listing entries, and secure deletion.
     """
     def __init__(self, storage_file="vault.json"):
         self.storage_file = storage_file
@@ -88,42 +88,26 @@ class SecurePasswordManager:
         if passwords is None:
             return
 
-        # Use a composite key to allow multiple accounts per service without overwriting
         record_key = f"{service} | {username}"
         passwords[record_key] = {"service": service, "username": username, "password": password}
 
-        # Re-encrypt everything with a freshly derived key and existing salt
-        vault_data = self._load_vault_file()
-        salt = base64.b64decode(vault_data["salt"])
-        key = self._derive_key(master_password, salt)
-
-        json_bytes = json.dumps(passwords).encode('utf-8')
-        aesgcm = AESGCM(key)
-        nonce = os.urandom(12)
-        ciphertext = aesgcm.encrypt(nonce, json_bytes, None)
-
-        encrypted_payload = base64.b64encode(nonce + ciphertext).decode('utf-8')
-        vault_data["encrypted_data"] = encrypted_payload
-        
-        self._save_vault_file(vault_data)
+        self._save_and_encrypt_vault(master_password, passwords)
         print(f"\n[+] Credentials for '{service}' ({username}) successfully saved.")
 
     def get_password(self, service: str, username: str = None):
-        """Retrieves and displays service credentials. If multiple exist, username is required."""
+        """Retrieves, displays, and copies a specific service password to the clipboard."""
         master_password = getpass.getpass("Enter Master Password to unlock vault: ")
         passwords = self._load_and_decrypt_vault(master_password)
         
         if passwords is None:
             return
 
-        # Filter records matching the requested service
         matching_records = [v for k, v in passwords.items() if v.get("service") == service]
 
         if not matching_records:
             print(f"\n[-] No records found for service '{service}'.")
             return
 
-        # If multiple accounts exist for this service and no specific username was given
         if len(matching_records) > 1 and not username:
             print(f"\n[!] Multiple accounts found for '{service}':")
             for rec in matching_records:
@@ -131,7 +115,6 @@ class SecurePasswordManager:
             print("[-] Please specify a username using the -u/--username flag.")
             return
 
-        # Find the specific target record
         target_record = None
         if username:
             for rec in matching_records:
@@ -150,6 +133,55 @@ class SecurePasswordManager:
             pyperclip.copy(pwd)
         else:
             print(f"\n[-] No record found for service '{service}' with username '{username}'.")
+
+    def list_vault_entries(self):
+        """Lists all saved services and usernames securely without exposing plaintext passwords."""
+        master_password = getpass.getpass("Enter Master Password to unlock vault: ")
+        passwords = self._load_and_decrypt_vault(master_password)
+        
+        if passwords is None:
+            return
+
+        if not passwords:
+            print("\n[-] Vault is currently empty.")
+            return
+
+        print("\n--- [ Stored Vault Entries ] ---")
+        for record_key, data in passwords.items():
+            print(f" • Service: {data['service']} | Username: {data['username']}")
+        print("-" * 32)
+
+    def delete_password(self, service: str, username: str):
+        """Deletes a specific credential entry from the vault."""
+        master_password = getpass.getpass("Enter Master Password to unlock vault: ")
+        passwords = self._load_and_decrypt_vault(master_password)
+        
+        if passwords is None:
+            return
+
+        record_key = f"{service} | {username}"
+        if record_key in passwords:
+            del passwords[record_key]
+            self._save_and_encrypt_vault(master_password, passwords)
+            print(f"\n[+] Credentials for '{service}' ({username}) successfully deleted.")
+        else:
+            print(f"\n[-] No record found for service '{service}' with username '{username}'.")
+
+    def _save_and_encrypt_vault(self, master_password: str, passwords: dict):
+        """Helper method to encrypt and save the entire password dictionary to disk."""
+        vault_data = self._load_vault_file()
+        salt = base64.b64decode(vault_data["salt"])
+        key = self._derive_key(master_password, salt)
+
+        json_bytes = json.dumps(passwords).encode('utf-8')
+        aesgcm = AESGCM(key)
+        nonce = os.urandom(12)
+        ciphertext = aesgcm.encrypt(nonce, json_bytes, None)
+
+        encrypted_payload = base64.b64encode(nonce + ciphertext).decode('utf-8')
+        vault_data["encrypted_data"] = encrypted_payload
+        
+        self._save_vault_file(vault_data)
 
     def _save_vault_file(self, data):
         with open(self.storage_file, "w") as f:
@@ -190,6 +222,14 @@ def main():
     get_parser.add_argument("-s", "--service", required=True, help="Service name to look up")
     get_parser.add_argument("-u", "--username", required=False, help="Specific username (required if multiple accounts exist)")
 
+    # list command
+    subparsers.add_parser("list", help="List all stored service entries")
+
+    # delete command
+    del_parser = subparsers.add_parser("delete", help="Delete a password entry")
+    del_parser.add_argument("-s", "--service", required=True, help="Service name")
+    del_parser.add_argument("-u", "--username", required=True, help="Username or email")
+
     # generate command
     subparsers.add_parser("generate", help="Generate a standalone strong random password")
 
@@ -210,6 +250,12 @@ def main():
 
     elif args.command == "get":
         manager.get_password(args.service, args.username)
+
+    elif args.command == "list":
+        manager.list_vault_entries()
+
+    elif args.command == "delete":
+        manager.delete_password(args.service, args.username)
 
     elif args.command == "generate":
         strong_pwd = generate_strong_password()
