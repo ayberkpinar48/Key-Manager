@@ -15,6 +15,7 @@ class SecurePasswordManager:
     """
     A secure, local command-line password manager implementing PBKDF2 
     for key derivation and AES-GCM for authenticated encryption.
+    Supports multiple accounts per service via unique service-username keys.
     """
     def __init__(self, storage_file="vault.json"):
         self.storage_file = storage_file
@@ -80,15 +81,16 @@ class SecurePasswordManager:
             return None
 
     def add_password(self, service: str, username: str, password: str):
-        """Adds or updates a credential inside the vault."""
+        """Adds or updates a credential using a composite key (service + username)."""
         master_password = getpass.getpass("Enter Master Password to unlock vault: ")
         passwords = self._load_and_decrypt_vault(master_password)
         
         if passwords is None:
             return
 
-        # Update or add service record
-        passwords[service] = {"username": username, "password": password}
+        # Use a composite key to allow multiple accounts per service without overwriting
+        record_key = f"{service} | {username}"
+        passwords[record_key] = {"service": service, "username": username, "password": password}
 
         # Re-encrypt everything with a freshly derived key and existing salt
         vault_data = self._load_vault_file()
@@ -104,29 +106,50 @@ class SecurePasswordManager:
         vault_data["encrypted_data"] = encrypted_payload
         
         self._save_vault_file(vault_data)
-        print(f"\n[+] Credentials for '{service}' successfully saved.")
+        print(f"\n[+] Credentials for '{service}' ({username}) successfully saved.")
 
-    def get_password(self, service: str):
-        """Retrieves, displays, and copies a specific service password to the clipboard."""
+    def get_password(self, service: str, username: str = None):
+        """Retrieves and displays service credentials. If multiple exist, username is required."""
         master_password = getpass.getpass("Enter Master Password to unlock vault: ")
         passwords = self._load_and_decrypt_vault(master_password)
         
         if passwords is None:
             return
 
-        if service in passwords:
-            username = passwords[service]['username']
-            password = passwords[service]['password']
-            
-            print(f"\n--- [ {service} Details ] ---")
-            print(f"Username : {username}")
-            print(f"Password : [Copied to Clipboard]")
-            print("-" * 25)
-            
-            # Copy password to clipboard automatically
-            pyperclip.copy(password)
+        # Filter records matching the requested service
+        matching_records = [v for k, v in passwords.items() if v.get("service") == service]
+
+        if not matching_records:
+            print(f"\n[-] No records found for service '{service}'.")
+            return
+
+        # If multiple accounts exist for this service and no specific username was given
+        if len(matching_records) > 1 and not username:
+            print(f"\n[!] Multiple accounts found for '{service}':")
+            for rec in matching_records:
+                print(f"    - Username: {rec['username']}")
+            print("[-] Please specify a username using the -u/--username flag.")
+            return
+
+        # Find the specific target record
+        target_record = None
+        if username:
+            for rec in matching_records:
+                if rec['username'] == username:
+                    target_record = rec
+                    break
         else:
-            print(f"\n[-] No record found for service '{service}'.")
+            target_record = matching_records[0]
+
+        if target_record:
+            pwd = target_record['password']
+            print(f"\n--- [ {target_record['service']} ({target_record['username']}) ] ---")
+            print(f"Username : {target_record['username']}")
+            print(f"Password : [Copied to Clipboard]")
+            print("-" * 35)
+            pyperclip.copy(pwd)
+        else:
+            print(f"\n[-] No record found for service '{service}' with username '{username}'.")
 
     def _save_vault_file(self, data):
         with open(self.storage_file, "w") as f:
@@ -165,6 +188,7 @@ def main():
     # get command
     get_parser = subparsers.add_parser("get", help="Retrieve a password entry")
     get_parser.add_argument("-s", "--service", required=True, help="Service name to look up")
+    get_parser.add_argument("-u", "--username", required=False, help="Specific username (required if multiple accounts exist)")
 
     # generate command
     subparsers.add_parser("generate", help="Generate a standalone strong random password")
@@ -185,7 +209,7 @@ def main():
         manager.add_password(args.service, args.username, password)
 
     elif args.command == "get":
-        manager.get_password(args.service)
+        manager.get_password(args.service, args.username)
 
     elif args.command == "generate":
         strong_pwd = generate_strong_password()
