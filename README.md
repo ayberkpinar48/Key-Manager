@@ -54,7 +54,7 @@ To start the app run:
 ```bash
 python password_manager.py
 ```
-If you want to run the app without openeing the terminal you can run these commands and this will create a executable that you can easily open with double click:
+If you want to run the app without openeing the terminal you can run these commands and this will create a executable that you can open with double click:
 ```bash
 pip install pyinstaller
 pyinstaller --onefile --noconsole password_manager_gui.py
