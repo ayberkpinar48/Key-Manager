@@ -109,7 +109,7 @@ def generate_strong_password(length=16) -> str:
 
 class PasswordManagerGUI:
     """
-    Lightweight, performance-oriented Tkinter GUI with resizable dialogs and keyboard shortcuts.
+    Lightweight, performance-oriented Tkinter GUI with custom keyboard shortcuts for quick copying.
     """
     def __init__(self, root):
         self.root = root
@@ -189,7 +189,7 @@ class PasswordManagerGUI:
             messagebox.showerror("Error", "Incorrect Master Password!")
 
     def build_main_screen(self):
-        """Builds the main dashboard screen after successful unlock with clear action buttons."""
+        """Builds the main dashboard screen after successful unlock with keyboard bindings."""
         self.clear_window()
 
         top_frame = tk.Frame(self.root)
@@ -203,12 +203,20 @@ class PasswordManagerGUI:
 
         self.listbox = tk.Listbox(list_frame, width=54, height=12, font=("Arial", 10))
         self.listbox.pack(side=tk.LEFT, fill=tk.BOTH)
+        self.listbox.focus_set() # Focus on listbox so shortcuts work immediately
 
         scrollbar = tk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.listbox.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.listbox.config(yscrollcommand=scrollbar.set)
 
         self.refresh_listbox()
+
+        # Bind keyboard shortcuts to the listbox
+        # Ctrl+C -> Copy Password, Ctrl+B -> Copy Username
+        self.listbox.bind('<Control-k>', lambda event: self.copy_selected_password())
+        self.listbox.bind('<Control-K>', lambda event: self.copy_selected_password())
+        self.listbox.bind('<Control-b>', lambda event: self.copy_selected_username())
+        self.listbox.bind('<Control-B>', lambda event: self.copy_selected_username())
 
         btn_frame = tk.Frame(self.root)
         btn_frame.pack(pady=15)
@@ -226,11 +234,11 @@ class PasswordManagerGUI:
             self.listbox.insert(tk.END, f"{service}  —  ({username})")
 
     def open_add_dialog(self):
-        """Opens a popup dialog to add a new credential with proper sizing and resizability."""
+        """Opens a popup dialog to add a new credential."""
         dialog = tk.Toplevel(self.root)
         dialog.title("Add New Credential")
-        dialog.geometry("360x320") # Increased size to prevent overflow
-        dialog.resizable(True, True) # Allow user to resize if needed
+        dialog.geometry("360x320")
+        dialog.resizable(True, True)
         dialog.grab_set()
 
         tk.Label(dialog, text="Service Name (e.g., github.com):", font=("Arial", 9)).pack(anchor="w", padx=20, pady=(15, 5))
@@ -280,7 +288,7 @@ class PasswordManagerGUI:
         dialog.bind('<Return>', lambda event: save_entry())
 
     def copy_selected_password(self):
-        """Copies the password of the selected item in the listbox to clipboard."""
+        """Copies the password of the selected item in the listbox to clipboard (Ctrl+C)."""
         selected_idx = self.listbox.curselection()
         if not selected_idx:
             messagebox.showwarning("Warning", "Please select an entry from the list first.")
@@ -291,7 +299,19 @@ class PasswordManagerGUI:
         password = self.passwords[target_key]['password']
 
         pyperclip.copy(password)
-        messagebox.showinfo("Copied", "Password successfully copied to clipboard!")
+
+    def copy_selected_username(self):
+        """Copies the username of the selected item in the listbox to clipboard (Ctrl+B)."""
+        selected_idx = self.listbox.curselection()
+        if not selected_idx:
+            messagebox.showwarning("Warning", "Please select an entry from the list first.")
+            return
+
+        record_keys = list(self.passwords.keys())
+        target_key = record_keys[selected_idx[0]]
+        username = self.passwords[target_key]['username']
+
+        pyperclip.copy(username)
 
     def delete_selected_entry(self):
         """Deletes the selected credential entry after confirmation."""

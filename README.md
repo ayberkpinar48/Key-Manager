@@ -1,19 +1,21 @@
-# Secure Local Command-Line Password Manager
+# Secure Local Password Manager
 
-A secure, lightweight local password manager built in Python. It implements cryptographic best practices including key derivation functions and authenticated encryption to protect sensitive user credentials.
+A project I initially started to learn about encryption algorithms has evolved into something I now use myself. A secure, lightweight, and performance oriented local password manager built in Python using **Tkinter** for the graphical interface and the **`cryptography`** library for robust security. Designed with zero heavy dependencies or unnecessary animations.
 
 ## Cryptographic Architecture
 
 1. **Key Derivation (KDF):** User master passwords are never stored. Instead, a strong 256-bit AES key is derived using **PBKDF2-HMAC-SHA256** with 100,000 iterations and a cryptographically secure random 16-byte salt.
-2. **Authenticated Encryption (AEAD):** All stored credentials are encrypted using **AES-GCM (Galois/Counter Mode)**. This ensures both confidentiality and data integrity (detecting any tampering or unauthorized modifications).
-3. **Secret Generation:** Standalone and automatic strong passwords are generated using Python's cryptographically secure `secrets` module.
-4. **Secure Input:** Master passwords and secrets are securely read from the terminal without echoing using the `getpass` module.
+2. **Authenticated Encryption (AEAD):** All stored credentials are encrypted using **AES-GCM (Galois/Counter Mode)**, ensuring confidentiality and integrity verification (detecting any tampering).
+3. **Secret Generation:** Strong passwords are automatically generated using Python's cryptographically secure `secrets` module.
 
 ## Features
 
-- **Multiple Accounts Support:** Store multiple usernames/passwords for the same service.
-- **Automatic Clipboard Management:** Automatically copies retrieved or generated passwords to your system clipboard using `pyperclip`.
-- **Full CRUD Management:** Initialize, add, retrieve, list, and delete vault entries securely from the command line.
+- **Performance-Oriented GUI:** Clean, lightweight Tkinter interface with zero bloat.
+- **Multiple Accounts Support:** Store multiple usernames/passwords for the same service
+  - `Ctrl + C`: Instantly copy selected password to clipboard.
+  - `Ctrl + B`: Instantly copy selected username to clipboard.
+  - `Enter`: Trigger actions quickly (Unlock, Save, etc.).
+- **Standalone Packaging:** Can be compiled into a single executable file using PyInstaller.
 
 ## Prerequisites
 
@@ -21,15 +23,15 @@ A secure, lightweight local password manager built in Python. It implements cryp
 - `cryptography` library
 - `pyperclip` library
 
-## Installation
+## Installation & Running
 
 1. Clone the repository and navigate to the project folder.
 2. Install the required dependencies:
    ```bash
    pip install cryptography pyperclip
 
-## Usage
- 
+## Usage Terminal
+
  1. Initialize a new vault:
     ```bash
     python password_manager.py init
@@ -46,6 +48,17 @@ A secure, lightweight local password manager built in Python. It implements cryp
  4. Generate a sandalone secure password
     ```bash
     python password_manager.py generate
+
+## Usage Graphical Application
+To start the app run:
+```bash
+python password_manager.py
+```
+If you want to run the app without openeing the terminal you can run these commands and this will create a executable that you can easily open with double click:
+```bash
+pip install pyinstaller
+pyinstaller --onefile --noconsole password_manager_gui.py
+```
 
 ## Security Note
 
